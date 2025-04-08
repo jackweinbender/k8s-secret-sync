@@ -37,7 +37,7 @@ jobs:
 
       - name: Build and push image
         run: |
-          ko publish ./... \
+          ko publish ./main.go \
             --base-import-paths \
             --platform=linux/amd64,linux/arm64 \
             --tags ghcr.io/${{ github.repository }}:${{ github.sha }} \
