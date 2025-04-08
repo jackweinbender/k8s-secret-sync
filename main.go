@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	poviderAnnotation       = "k8s-secret-sync.weinbender.io/provider"
+	providerAnnotation      = "k8s-secret-sync.weinbender.io/provider"
 	refAnnotation           = "k8s-secret-sync.weinbender.io/ref"
 	secretDataKeyAnnotation = "k8s-secret-sync.weinbender.io/secret-key"
 	defaultSecretDataKey    = "value"
@@ -63,8 +63,9 @@ func main() {
 			}
 
 			// Check to see if the secret has a provider annotation
-			providerName, exists := oldSecret.Annotations[poviderAnnotation]
-			if !exists || providerName != "1password" {
+			providerName, exists := oldSecret.Annotations[providerAnnotation]
+			log.Printf("Processing %s/%s with provider %s", oldSecret.Namespace, oldSecret.Name, providerName)
+			if !exists || providerName == "" {
 				// If the annotation is missing or empty, skip processing
 				log.Printf("Ignoring %s/%s as it does not have the required `provider` annotation", oldSecret.Namespace, oldSecret.Name)
 				return
