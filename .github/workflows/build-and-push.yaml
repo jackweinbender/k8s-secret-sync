@@ -38,9 +38,9 @@ jobs:
       - name: Build and push image
         env:
           KO_DOCKER_REPO: ghcr.io/jackweinbender/secrets-operator
-        run: >
-          ko build ./
-            -t "${{ github.sha }}"
-            -t "${{ github.ref_name }}"
-            -t "latest"
+        run: |
+          ko build ./ \
+            -t "${{ github.sha }}" \
+            -t "${{ github.ref_name }}" \
+            -t "latest" \
             --platform linux/amd64,linux/arm64 -B
