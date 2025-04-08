@@ -2,20 +2,30 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"log"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/1password/onepassword-sdk-go"
+	"github.com/jackweinbender/secrets-operator/op"
+	"github.com/jackweinbender/secrets-operator/shared"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+)
+
+var (
+	poviderAnnotation       = "k8s-secret-sync.weinbender.io/provider"
+	refAnnotation           = "k8s-secret-sync.weinbender.io/ref"
+	secretDataKeyAnnotation = "k8s-secret-sync.weinbender.io/secret-key"
+	defaultSecretDataKey    = "value"
 )
 
 func main() {
@@ -29,54 +39,85 @@ func main() {
 	}
 
 	// Initialize 1Password SDK
-	opClient, err := onePasswordInit()
+	opClient, err := op.NewProvider()
 	if err != nil {
 		log.Fatalf("Error initializing 1Password SDK: %v", err)
 	}
 
+	providers := map[string]shared.SecretProvider{
+		"op": opClient,
+	}
+
 	// Set up informer to watch secrets
-	secretInformer := informers.NewSharedInformerFactory(clientset, time.Second*30).Core().V1().Secrets().Informer()
+	secretInformer := informers.NewSharedInformerFactory(
+		clientset, 5*time.Second).Core().V1().Secrets().Informer()
 
 	secretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(oldObj, newObj any) {
+		UpdateFunc: func(oldObj, _ any) {
 			oldSecret, ok := oldObj.(*v1.Secret)
 
 			if !ok {
 				// If the old object is not a Secret, skip processing
-				log.Printf("Failed to cast old object to Secret")
+				log.Printf("Failed to cast old object to Secret, skipping.")
 				return
 			}
 
-			secretURI, exist := oldSecret.Data["op"]
-			if !exist {
-				// If the old secret does not have the "op" key, skip processing
-				log.Printf("Skipping old secret as it does not contain 'op' key")
+			// Check to see if the secret has a provider annotation
+			providerName, exists := oldSecret.Annotations[poviderAnnotation]
+			if !exists || providerName != "1password" {
+				// If the annotation is missing or empty, skip processing
+				log.Printf("Ignoring %s/%s as it does not have the required `provider` annotation", oldSecret.Namespace, oldSecret.Name)
 				return
+			}
+
+			secretID, exits := oldSecret.Annotations[refAnnotation]
+			if !exits || secretID == "" {
+				// If the annotation is missing or empty, skip processing
+				log.Printf("Ignoring %s/%s as it does not have the required `ref` annotation", oldSecret.Namespace, oldSecret.Name)
+				return
+			}
+
+			// Determine the secret data key to use, use default otherwise
+			secretDataKey := defaultSecretDataKey
+			secretKeyAnnotationValue, exists := oldSecret.Annotations[secretDataKeyAnnotation]
+
+			if exists && secretKeyAnnotationValue != "" {
+				secretDataKey = secretKeyAnnotationValue
 			}
 
 			// fetch the value of the "op" key from the old secret to ensure it is a valid 1Password item reference
-			value, err := opClient.Secrets().Resolve(ctx, string(secretURI))
+			value, err := providers[providerName].GetSecretValue(ctx, secretID)
+
 			if err != nil {
-				log.Printf("Failed to resolve 1Password secret URI %s: %v", string(secretURI), err)
+				log.Printf("Failed to resolve 1Password secret URI %s: %v", secretID, err)
 				return
 			}
 
-			// Proceed to update the new object with the resolved value
-			newSecret, ok := newObj.(*runtime.Object)
-			if !ok {
-				log.Printf("Failed to cast new object to runtime.Object")
-				return
+			patchData := v1.Secret{
+				Data: map[string][]byte{
+					secretDataKey: []byte(value),
+				},
 			}
-			// Ensure the new object is a Secret
-			secret, ok := (*newSecret).(*v1.Secret)
-			if !ok {
-				log.Printf("Failed to cast new object to Secret")
-				return
+			payloadBytes, err := json.Marshal(patchData)
+			if err != nil {
+				panic(err)
 			}
 
-			// Update the new secret with the resolved value from 1Password
-			secret.Data["op"] = secretURI
-			secret.Data["value"] = []byte(value)
+			_, err = clientset.CoreV1().Secrets(oldSecret.Namespace).Patch(
+				ctx,
+				oldSecret.Name,
+				types.StrategicMergePatchType,
+				payloadBytes,
+				metav1.PatchOptions{})
+
+			// Update the Kubernetes secret in the cluster
+			if err != nil {
+				// Handle error updating the secret
+				log.Printf("Failed to update Kubernetes Secret %s/%s: %v", oldSecret.Namespace, oldSecret.Name, err)
+				return
+			}
+			// Log successful update
+			log.Printf("Successfully updated Kubernetes Secret %s/%s with 1Password value", oldSecret.Namespace, oldSecret.Name)
 		},
 	})
 
@@ -115,19 +156,4 @@ func kubernetesClientsetInit() (*kubernetes.Clientset, error) {
 
 	log.Println("Successfully connected to Kubernetes cluster")
 	return clientset, nil
-}
-
-func onePasswordInit() (*onepassword.Client, error) {
-	token := os.Getenv("OP_SERVICE_ACCOUNT_TOKEN")
-
-	client, err := onepassword.NewClient(
-		context.TODO(),
-		onepassword.WithServiceAccountToken(token),
-		onepassword.WithIntegrationInfo("My k8s secret sync operator", "v0"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return client, nil
 }
