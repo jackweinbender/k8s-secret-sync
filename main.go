@@ -50,7 +50,7 @@ func main() {
 
 	// Set up informer to watch secrets
 	secretInformer := informers.NewSharedInformerFactory(
-		clientset, 5*time.Second).Core().V1().Secrets().Informer()
+		clientset, 30*time.Second).Core().V1().Secrets().Informer()
 
 	secretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(oldObj, _ any) {
