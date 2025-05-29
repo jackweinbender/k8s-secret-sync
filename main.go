@@ -1,19 +1,21 @@
 // Package main implements a Kubernetes operator that syncs secrets from 1Password into Kubernetes secrets.
 package main
 
-// Import necessary packages for context, logging, Kubernetes client, and 1Password integration.
 import (
 	"context"
 	"encoding/json"
 	"flag"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/jackweinbender/secrets-operator/op"
-	"github.com/jackweinbender/secrets-operator/shared"
+	"github.com/jackweinbender/secrets-operator/shared" // Import necessary packages for context, logging, Kubernetes client, and 1Password integration.
+
 	v1 "k8s.io/api/core/v1"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
@@ -75,9 +77,15 @@ func main() {
 			}
 
 			// Check for required ref annotation
-			secretID, exits := secret.Annotations[refAnnotation]
-			if !exits || secretID == "" {
+			secretID, exists := secret.Annotations[refAnnotation]
+			if !exists || secretID == "" {
 				log.Printf("Ignoring %s/%s as it does not have the required `ref` annotation", secret.Namespace, secret.Name)
+				return
+			}
+
+			// Check for last-synced annotation
+			if _, synced := secret.Annotations["last-synced"]; synced {
+				log.Printf("Secret %s/%s has already been synced (last-synced annotation present)", secret.Namespace, secret.Name)
 				return
 			}
 
@@ -94,15 +102,24 @@ func main() {
 				return
 			}
 
+			// Copy annotations and add last-synced
+			annotations := make(map[string]string)
+			maps.Copy(annotations, secret.Annotations)
+			annotations["last-synced"] = time.Now().UTC().Format(time.RFC3339)
+
 			// Prepare the patch data to update the Kubernetes secret
 			patchData := v1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: annotations,
+				},
 				Data: map[string][]byte{
 					secretDataKey: []byte(value),
 				},
 			}
 			payloadBytes, err := json.Marshal(patchData)
 			if err != nil {
-				panic(err)
+				log.Printf("Failed to marshal patch data: %v", err)
+				return
 			}
 
 			// Patch the secret in the Kubernetes cluster
@@ -117,7 +134,7 @@ func main() {
 				log.Printf("Failed to update Kubernetes Secret %s/%s: %v", secret.Namespace, secret.Name, err)
 				return
 			}
-			log.Printf("Successfully updated Kubernetes Secret %s/%s with 1Password value", secret.Namespace, secret.Name)
+			log.Printf("Successfully updated Kubernetes Secret %s/%s with 1Password value and set last-synced annotation", secret.Namespace, secret.Name)
 		},
 	})
 
