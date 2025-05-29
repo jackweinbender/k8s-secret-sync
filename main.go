@@ -1,5 +1,7 @@
+// Package main implements a Kubernetes operator that syncs secrets from 1Password into Kubernetes secrets.
 package main
 
+// Import necessary packages for context, logging, Kubernetes client, and 1Password integration.
 import (
 	"context"
 	"encoding/json"
@@ -21,79 +23,78 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// Annotation keys and default values used for identifying and processing secrets.
 var (
-	providerAnnotation      = "k8s-secret-sync.weinbender.io/provider"
-	refAnnotation           = "k8s-secret-sync.weinbender.io/ref"
-	secretDataKeyAnnotation = "k8s-secret-sync.weinbender.io/secret-key"
-	defaultSecretDataKey    = "value"
+	providerAnnotation      = "k8s-secret-sync.weinbender.io/provider"   // Annotation to specify the secret provider (e.g., "op" for 1Password)
+	refAnnotation           = "k8s-secret-sync.weinbender.io/ref"        // Annotation to specify the reference or ID of the secret in the provider
+	secretDataKeyAnnotation = "k8s-secret-sync.weinbender.io/secret-key" // Annotation to specify the key in the secret data to update
+	defaultSecretDataKey    = "value"                                    // Default key in the secret data if annotation is not set
 )
 
 func main() {
-	// Define the context for the application
+	// Create a context for API calls and background operations
 	ctx := context.Background()
 
-	// Initialize Kubernetes clientset
+	// Initialize the Kubernetes clientset for interacting with the cluster
 	clientset, err := kubernetesClientsetInit()
 	if err != nil {
 		log.Fatalf("Error initializing Kubernetes clientset: %v", err)
 	}
 
-	// Initialize 1Password SDK
+	// Initialize the 1Password provider for fetching secrets
 	opClient, err := op.NewProvider()
 	if err != nil {
 		log.Fatalf("Error initializing 1Password SDK: %v", err)
 	}
 
+	// Map of supported secret providers (currently only 1Password)
 	providers := map[string]shared.SecretProvider{
 		"op": opClient,
 	}
 
-	// Set up informer to watch secrets
+	// Set up a shared informer to watch for changes to Kubernetes secrets
 	secretInformer := informers.NewSharedInformerFactory(
-		clientset, 30*time.Second).Core().V1().Secrets().Informer()
+		clientset, 10*time.Second).Core().V1().Secrets().Informer()
 
+	// Register event handlers for secret add and update events
 	secretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(oldObj, _ any) {
-			oldSecret, ok := oldObj.(*v1.Secret)
-
+		// Handler for new secret creation events
+		AddFunc: func(obj any) {
+			secret, ok := obj.(*v1.Secret)
 			if !ok {
-				// If the old object is not a Secret, skip processing
-				log.Printf("Failed to cast old object to Secret, skipping.")
+				log.Printf("Failed to cast object to Secret on add event, skipping.")
 				return
 			}
 
-			// Check to see if the secret has a provider annotation
-			providerName, exists := oldSecret.Annotations[providerAnnotation]
-			log.Printf("Processing %s/%s with provider %s", oldSecret.Namespace, oldSecret.Name, providerName)
+			// Check for required provider annotation
+			providerName, exists := secret.Annotations[providerAnnotation]
+			log.Printf("Processing %s/%s with provider %s", secret.Namespace, secret.Name, providerName)
 			if !exists || providerName == "" {
-				// If the annotation is missing or empty, skip processing
-				log.Printf("Ignoring %s/%s as it does not have the required `provider` annotation", oldSecret.Namespace, oldSecret.Name)
+				log.Printf("Ignoring %s/%s as it does not have the required `provider` annotation", secret.Namespace, secret.Name)
 				return
 			}
 
-			secretID, exits := oldSecret.Annotations[refAnnotation]
+			// Check for required ref annotation
+			secretID, exits := secret.Annotations[refAnnotation]
 			if !exits || secretID == "" {
-				// If the annotation is missing or empty, skip processing
-				log.Printf("Ignoring %s/%s as it does not have the required `ref` annotation", oldSecret.Namespace, oldSecret.Name)
+				log.Printf("Ignoring %s/%s as it does not have the required `ref` annotation", secret.Namespace, secret.Name)
 				return
 			}
 
-			// Determine the secret data key to use, use default otherwise
+			// Determine which key in the secret data to update
 			secretDataKey := defaultSecretDataKey
-			secretKeyAnnotationValue, exists := oldSecret.Annotations[secretDataKeyAnnotation]
-
-			if exists && secretKeyAnnotationValue != "" {
+			if secretKeyAnnotationValue, exists := secret.Annotations[secretDataKeyAnnotation]; exists && secretKeyAnnotationValue != "" {
 				secretDataKey = secretKeyAnnotationValue
 			}
 
-			// fetch the value of the "op" key from the old secret to ensure it is a valid 1Password item reference
+			// Fetch the secret value from the provider (e.g., 1Password)
 			value, err := providers[providerName].GetSecretValue(ctx, secretID)
-
 			if err != nil {
 				log.Printf("Failed to resolve 1Password secret URI %s: %v", secretID, err)
 				return
 			}
 
+			// Prepare the patch data to update the Kubernetes secret
 			patchData := v1.Secret{
 				Data: map[string][]byte{
 					secretDataKey: []byte(value),
@@ -104,33 +105,32 @@ func main() {
 				panic(err)
 			}
 
-			_, err = clientset.CoreV1().Secrets(oldSecret.Namespace).Patch(
+			// Patch the secret in the Kubernetes cluster
+			_, err = clientset.CoreV1().Secrets(secret.Namespace).Patch(
 				ctx,
-				oldSecret.Name,
+				secret.Name,
 				types.StrategicMergePatchType,
 				payloadBytes,
 				metav1.PatchOptions{})
 
-			// Update the Kubernetes secret in the cluster
 			if err != nil {
-				// Handle error updating the secret
-				log.Printf("Failed to update Kubernetes Secret %s/%s: %v", oldSecret.Namespace, oldSecret.Name, err)
+				log.Printf("Failed to update Kubernetes Secret %s/%s: %v", secret.Namespace, secret.Name, err)
 				return
 			}
-			// Log successful update
-			log.Printf("Successfully updated Kubernetes Secret %s/%s with 1Password value", oldSecret.Namespace, oldSecret.Name)
+			log.Printf("Successfully updated Kubernetes Secret %s/%s with 1Password value", secret.Namespace, secret.Name)
 		},
 	})
 
-	// Start informer
+	// Start the informer to begin watching for secret events
 	stop := make(chan struct{})
 	defer close(stop)
 	secretInformer.Run(stop)
 
-	// Keep the main function running
+	// Block forever to keep the operator running
 	select {}
 }
 
+// kubernetesClientsetInit initializes and returns a Kubernetes clientset, using in-cluster config if available, or falling back to kubeconfig file.
 func kubernetesClientsetInit() (*kubernetes.Clientset, error) {
 	var kubeconfig *string
 	if home := os.Getenv("HOME"); home != "" {
