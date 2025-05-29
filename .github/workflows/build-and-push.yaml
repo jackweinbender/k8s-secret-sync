@@ -38,9 +38,12 @@ jobs:
       - name: Build and push image
         env:
           KO_DOCKER_REPO: ghcr.io/jackweinbender
+          GITHUB_REF_NAME: ${{ github.ref_name }}
         run: |
+          # Sanitize the ref name for use as a Docker tag
+          REF_TAG_NAME="${GITHUB_REF_NAME//\//-}"
           ko build ./ \
             -t "${{ github.sha }}" \
-            -t "${{ github.ref_name }}" \
+            -t "${REF_TAG_NAME}" \
             -t "latest" \
             --platform linux/amd64,linux/arm64 -B
