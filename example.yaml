@@ -3,6 +3,6 @@ kind: Secret
 metadata:
   name: example-secret
   annotations:
-    k8s-secret-sync.weinbender.io/ref: op://somevault/secret-item/credential # ref to the secret in the remote provider
-    k8s-secret-sync.weinbender.io/provider: op # this is the `onepassword` provider
-    # k8s-secret-sync.weinbender.io/secret-key # optional key to use in the secret, defaults to `value`
+    k8s-secrets-sync.weinbender.io/ref: op://somevault/secret-item/credential # ref to the secret in the remote provider
+    k8s-secrets-sync.weinbender.io/provider: op # this is the `onepassword` provider
+    # k8s-secrets-sync.weinbender.io/secret-key # optional key to use in the secret, defaults to `value`

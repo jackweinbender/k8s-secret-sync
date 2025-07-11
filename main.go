@@ -27,11 +27,17 @@ import (
 
 // Annotation keys and default values used for identifying and processing secrets.
 var (
-	providerAnnotation      = "k8s-secret-sync.weinbender.io/provider"   // Annotation to specify the secret provider (e.g., "op" for 1Password)
-	refAnnotation           = "k8s-secret-sync.weinbender.io/ref"        // Annotation to specify the reference or ID of the secret in the provider
-	secretDataKeyAnnotation = "k8s-secret-sync.weinbender.io/secret-key" // Annotation to specify the key in the secret data to update
-	defaultSecretDataKey    = "value"                                    // Default key in the secret data if annotation is not set
+	annotationPrefix       = "k8s-secrets-sync.weinbender.io/" // Base prefix for all annotations used by this operator
+	annotationKeyProvider  = "provider"                        // Annotation to specify the secret provider (e.g., "op" for 1Password)
+	annotationKeyRef       = "ref"                             // Annotation to specify the reference or ID of the secret in the provider
+	annotationKeySecretKey = "secret-key"                      // Annotation to specify the key in the secret data to update
+	defaultSecretDataKey   = "value"                           // Default key in the secret data if annotation is not set
 )
+
+func annotationFor(key string) string {
+	// Helper function to generate the full annotation key with prefix
+	return annotationPrefix + key
+}
 
 func main() {
 	// Create a context for API calls and background operations
@@ -69,7 +75,7 @@ func main() {
 			}
 
 			// Check for required provider annotation
-			providerName, exists := secret.Annotations[providerAnnotation]
+			providerName, exists := secret.Annotations[annotationFor(annotationKeyProvider)]
 			log.Printf("Processing %s/%s with provider %s", secret.Namespace, secret.Name, providerName)
 			if !exists || providerName == "" {
 				log.Printf("Ignoring %s/%s as it does not have the required `provider` annotation", secret.Namespace, secret.Name)
@@ -77,7 +83,7 @@ func main() {
 			}
 
 			// Check for required ref annotation
-			secretID, exists := secret.Annotations[refAnnotation]
+			secretID, exists := secret.Annotations[annotationFor(annotationKeyRef)]
 			if !exists || secretID == "" {
 				log.Printf("Ignoring %s/%s as it does not have the required `ref` annotation", secret.Namespace, secret.Name)
 				return
@@ -91,7 +97,7 @@ func main() {
 
 			// Determine which key in the secret data to update
 			secretDataKey := defaultSecretDataKey
-			if secretKeyAnnotationValue, exists := secret.Annotations[secretDataKeyAnnotation]; exists && secretKeyAnnotationValue != "" {
+			if secretKeyAnnotationValue, exists := secret.Annotations[annotationFor(annotationKeySecretKey)]; exists && secretKeyAnnotationValue != "" {
 				secretDataKey = secretKeyAnnotationValue
 			}
 
