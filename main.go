@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jackweinbender/secrets-operator/op"
-	"github.com/jackweinbender/secrets-operator/shared" // Import necessary packages for context, logging, Kubernetes client, and 1Password integration.
+	"github.com/jackweinbender/k8s-secrets-sync/op"
+	"github.com/jackweinbender/k8s-secrets-sync/shared" // Import necessary packages for context, logging, Kubernetes client, and 1Password integration.
 
 	v1 "k8s.io/api/core/v1"
 

@@ -1,4 +1,4 @@
-module github.com/jackweinbender/secrets-operator
+module github.com/jackweinbender/k8s-secrets-sync
 
 go 1.23.1
 

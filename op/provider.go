@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/1password/onepassword-sdk-go"
-	"github.com/jackweinbender/secrets-operator/shared"
+	"github.com/jackweinbender/k8s-secrets-sync/shared"
 )
 
 type secretProvider struct {
