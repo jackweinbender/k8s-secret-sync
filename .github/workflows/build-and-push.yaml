@@ -39,7 +39,7 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: |
           # don't set latest tag for non-main branches
-          ko build ./ \
+          ko build ./cmd/k8s-secret-sync \
             -t "${{ github.sha }}" \
             -t "${GITHUB_REF_NAME//\//-}" \
             --platform linux/amd64,linux/arm64 -B
@@ -50,7 +50,7 @@ jobs:
           KO_DOCKER_REPO: ghcr.io/jackweinbender
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: |
-          ko build ./ \
+          ko build ./cmd/k8s-secret-sync \
             -t "${{ github.sha }}" \
             -t "${GITHUB_REF_NAME//\//-}" \
             -t "latest" \

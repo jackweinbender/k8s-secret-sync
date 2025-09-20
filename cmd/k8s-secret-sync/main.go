@@ -11,9 +11,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jackweinbender/k8s-secrets-sync/op"
-	"github.com/jackweinbender/k8s-secrets-sync/shared" // Import necessary packages for context, logging, Kubernetes client, and 1Password integration.
+	"github.com/jackweinbender/k8s-secrets-sync/pkg/op"
+	"github.com/jackweinbender/k8s-secrets-sync/pkg/sync"
 
+	// Import necessary packages for context, logging, Kubernetes client, and 1Password integration.
 	v1 "k8s.io/api/core/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,20 +45,20 @@ func main() {
 	ctx := context.Background()
 
 	// Initialize the Kubernetes clientset for interacting with the cluster
-	clientset, err := kubernetesClientsetInit()
+	clientset, err := initClientSet()
 	if err != nil {
 		log.Fatalf("Error initializing Kubernetes clientset: %v", err)
 	}
 
-	// Initialize the 1Password provider for fetching secrets
-	opClient, err := op.NewProvider()
-	if err != nil {
-		log.Fatalf("Error initializing 1Password SDK: %v", err)
-	}
-
 	// Map of supported secret providers (currently only 1Password)
-	providers := map[string]shared.SecretProvider{
-		"op": opClient,
+	providers := map[string]func() sync.SecretProvider{
+		"op": func() sync.SecretProvider {
+			opClient, err := op.NewProvider()
+			if err != nil {
+				log.Fatalf("Error initializing 1Password SDK: %v", err)
+			}
+			return opClient
+		},
 	}
 
 	// Set up a shared informer to watch for changes to Kubernetes secrets
@@ -102,7 +103,7 @@ func main() {
 			}
 
 			// Fetch the secret value from the provider (e.g., 1Password)
-			value, err := providers[providerName].GetSecretValue(ctx, secretID)
+			value, err := providers[providerName]().GetSecretValue(ctx, secretID)
 			if err != nil {
 				log.Printf("Failed to resolve 1Password secret URI %s: %v", secretID, err)
 				return
@@ -153,8 +154,8 @@ func main() {
 	select {}
 }
 
-// kubernetesClientsetInit initializes and returns a Kubernetes clientset, using in-cluster config if available, or falling back to kubeconfig file.
-func kubernetesClientsetInit() (*kubernetes.Clientset, error) {
+// initClientSet initializes and returns a Kubernetes clientset, using in-cluster config if available, or falling back to kubeconfig file.
+func initClientSet() (*kubernetes.Clientset, error) {
 	var kubeconfig *string
 	if home := os.Getenv("HOME"); home != "" {
 		kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")

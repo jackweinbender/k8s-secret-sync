@@ -6,14 +6,14 @@ import (
 	"os"
 
 	"github.com/1password/onepassword-sdk-go"
-	"github.com/jackweinbender/k8s-secrets-sync/shared"
+	"github.com/jackweinbender/k8s-secrets-sync/pkg/sync"
 )
 
 type secretProvider struct {
 	client *onepassword.Client
 }
 
-func NewProvider() (shared.SecretProvider, error) {
+func NewProvider() (sync.SecretProvider, error) {
 	client, err := initClient()
 	if err != nil {
 		return nil, err
