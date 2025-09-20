@@ -51,13 +51,13 @@ func main() {
 	}
 
 	// Map of supported secret providers (currently only 1Password)
-	providers := map[string]func() sync.SecretProvider{
-		"op": func() sync.SecretProvider {
+	providers := map[string]func() (sync.SecretProvider, error){
+		"op": func() (sync.SecretProvider, error) {
 			opClient, err := op.NewProvider()
 			if err != nil {
-				log.Fatalf("Error initializing 1Password SDK: %v", err)
+				return nil, err
 			}
-			return opClient
+			return opClient, nil
 		},
 	}
 
@@ -103,7 +103,13 @@ func main() {
 			}
 
 			// Fetch the secret value from the provider (e.g., 1Password)
-			value, err := providers[providerName]().GetSecretValue(ctx, secretID)
+			provider, err := providers[providerName]()
+			if err != nil {
+				log.Printf("Failed to initialize provider %s: %v", providerName, err)
+				return
+			}
+
+			value, err := provider.GetSecretValue(ctx, secretID)
 			if err != nil {
 				log.Printf("Failed to resolve 1Password secret URI %s: %v", secretID, err)
 				return
