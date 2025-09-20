@@ -1,4 +1,4 @@
-module github.com/jackweinbender/k8s-secrets-sync
+module github.com/jackweinbender/k8s-secret-sync
 
 go 1.23.1
 

@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jackweinbender/k8s-secrets-sync/pkg/op"
-	"github.com/jackweinbender/k8s-secrets-sync/pkg/sync"
+	"github.com/jackweinbender/k8s-secret-sync/pkg/op"
+	"github.com/jackweinbender/k8s-secret-sync/pkg/sync"
 
 	// Import necessary packages for context, logging, Kubernetes client, and 1Password integration.
 	v1 "k8s.io/api/core/v1"
@@ -28,11 +28,11 @@ import (
 
 // Annotation keys and default values used for identifying and processing secrets.
 var (
-	annotationPrefix       = "k8s-secrets-sync.weinbender.io/" // Base prefix for all annotations used by this operator
-	annotationKeyProvider  = "provider"                        // Annotation to specify the secret provider (e.g., "op" for 1Password)
-	annotationKeyRef       = "ref"                             // Annotation to specify the reference or ID of the secret in the provider
-	annotationKeySecretKey = "secret-key"                      // Annotation to specify the key in the secret data to update
-	defaultSecretDataKey   = "value"                           // Default key in the secret data if annotation is not set
+	annotationPrefix       = "k8s-secret-sync.weinbender.io/" // Base prefix for all annotations used by this operator
+	annotationKeyProvider  = "provider"                       // Annotation to specify the secret provider (e.g., "op" for 1Password)
+	annotationKeyRef       = "ref"                            // Annotation to specify the reference or ID of the secret in the provider
+	annotationKeySecretKey = "secret-key"                     // Annotation to specify the key in the secret data to update
+	defaultSecretDataKey   = "value"                          // Default key in the secret data if annotation is not set
 )
 
 func annotationFor(key string) string {
