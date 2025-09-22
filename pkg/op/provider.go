@@ -2,10 +2,10 @@ package op
 
 import (
 	"context"
-	"log"
 	"os"
 
 	"github.com/1password/onepassword-sdk-go"
+	"k8s.io/klog/v2"
 )
 
 type SecretProvider struct {
@@ -15,7 +15,7 @@ type SecretProvider struct {
 func (p SecretProvider) GetSecretValue(ctx context.Context, secretID string) (string, error) {
 	value, err := p.Client.Secrets().Resolve(ctx, secretID)
 	if err != nil {
-		log.Printf("Failed to resolve 1Password secret URI %s: %v", secretID, err)
+		klog.ErrorS(err, "Failed to resolve 1Password secret URI", "secretID", secretID)
 		return "", err
 	}
 

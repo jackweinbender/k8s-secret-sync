@@ -8,7 +8,7 @@ package config
 type Annotations struct {
 	// Key for the annotation that specifies the secret provider.
 	// Used to specify which secret provider to use to fetch the secret value.
-	ProviderName string // default: "k8s-secret-sync.weinbender.io/provider"
+	ProviderName string // default: "k8s-secret-sync.weinbender.io/provider-name"
 
 	// Key for the annotation that specifies the secret reference for the provider.
 	// Used to specify the identifier or path of the secret for a given provider.

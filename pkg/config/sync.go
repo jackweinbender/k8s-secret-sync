@@ -1,9 +1,8 @@
 package config
 
 import (
-	"log"
-
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/klog/v2"
 )
 
 type Sync struct {
@@ -14,16 +13,17 @@ type Sync struct {
 }
 
 func New() *Sync {
-	log.Println("Intializing configuration...")
+	klog.InfoS("Initializing configuration...")
 
 	// Set up the Kubernetes clientset for interacting with the cluster
 	clientset, err := initClientSet()
 	if err != nil {
-		log.Fatalf("Error initializing Kubernetes clientset: %v", err)
+		klog.ErrorS(err, "Error initializing Kubernetes clientset")
+		return nil
 	}
 
 	// Read in configuration from environment variables with defaults
-	log.Println("Loading configuration from environment variables...")
+	klog.InfoS("Loading configuration from environment variables...")
 	return &Sync{
 		Clientset: clientset,
 		Annotations: Annotations{

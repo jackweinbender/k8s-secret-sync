@@ -3,7 +3,6 @@ package sync
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"maps"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 )
 
 type SecretProvider interface {
@@ -42,28 +42,28 @@ func Run(ctx context.Context, cfg *config.Sync) error {
 		AddFunc: func(obj any) {
 			secret, ok := obj.(*v1.Secret)
 			if !ok {
-				log.Printf("Failed to cast object to Secret on add event, skipping.")
+				klog.ErrorS(nil, "Failed to cast object to Secret on add event, skipping")
 				return
 			}
 
 			// Check for required provider annotation
 			providerName, exists := secret.Annotations[cfg.Annotations.ProviderName]
-			log.Printf("Processing %s/%s with provider %s", secret.Namespace, secret.Name, providerName)
+			klog.InfoS("Processing secret with provider", "namespace", secret.Namespace, "name", secret.Name, "provider", providerName)
 			if !exists || providerName == "" {
-				log.Printf("Ignoring %s/%s as it does not have the required `provider` annotation", secret.Namespace, secret.Name)
+				klog.InfoS("Ignoring secret as it does not have the required provider annotation", "namespace", secret.Namespace, "name", secret.Name)
 				return
 			}
 
 			// Check for required ref annotation
 			secretID, exists := secret.Annotations[cfg.Annotations.ProviderRef]
 			if !exists || secretID == "" {
-				log.Printf("Ignoring %s/%s as it does not have the required `ref` annotation", secret.Namespace, secret.Name)
+				klog.InfoS("Ignoring secret as it does not have the required ref annotation", "namespace", secret.Namespace, "name", secret.Name)
 				return
 			}
 
 			// Check for last-synced annotation
 			if _, synced := secret.Annotations["last-synced"]; synced {
-				log.Printf("Secret %s/%s has already been synced (last-synced annotation present)", secret.Namespace, secret.Name)
+				klog.InfoS("Secret has already been synced (last-synced annotation present)", "namespace", secret.Namespace, "name", secret.Name)
 				return
 			}
 
@@ -76,13 +76,13 @@ func Run(ctx context.Context, cfg *config.Sync) error {
 			// Fetch the secret value from the provider (e.g., 1Password)
 			provider, err := providers[providerName]()
 			if err != nil {
-				log.Printf("Failed to initialize provider %s: %v", providerName, err)
+				klog.ErrorS(err, "Failed to initialize provider", "provider", providerName)
 				return
 			}
 
 			value, err := provider.GetSecretValue(ctx, secretID)
 			if err != nil {
-				log.Printf("Failed to resolve 1Password secret URI %s: %v", secretID, err)
+				klog.ErrorS(err, "Failed to resolve secret URI", "secretID", secretID)
 				return
 			}
 
@@ -102,7 +102,7 @@ func Run(ctx context.Context, cfg *config.Sync) error {
 			}
 			payloadBytes, err := json.Marshal(patchData)
 			if err != nil {
-				log.Printf("Failed to marshal patch data: %v", err)
+				klog.ErrorS(err, "Failed to marshal patch data")
 				return
 			}
 
@@ -115,10 +115,10 @@ func Run(ctx context.Context, cfg *config.Sync) error {
 				metav1.PatchOptions{})
 
 			if err != nil {
-				log.Printf("Failed to update Kubernetes Secret %s/%s: %v", secret.Namespace, secret.Name, err)
+				klog.ErrorS(err, "Failed to update Kubernetes Secret", "namespace", secret.Namespace, "name", secret.Name)
 				return
 			}
-			log.Printf("Successfully updated Kubernetes Secret %s/%s with 1Password value and set last-synced annotation", secret.Namespace, secret.Name)
+			klog.InfoS("Successfully updated Kubernetes Secret with provider value and set last-synced annotation", "namespace", secret.Namespace, "name", secret.Name)
 		},
 	})
 

@@ -2,13 +2,13 @@ package config
 
 import (
 	"flag"
-	"log"
 	"os"
 	"path/filepath"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
 )
 
 // initClientSet initializes and returns a Kubernetes clientset for cluster interaction.
@@ -38,9 +38,9 @@ func initClientSet() (*kubernetes.Clientset, error) {
 	}
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		log.Fatalf("Error creating clientset: %v", err)
+		klog.ErrorS(err, "Error creating clientset")
 		return nil, err
 	}
-	log.Println("Successfully connected to Kubernetes cluster")
+	klog.InfoS("Successfully connected to Kubernetes cluster")
 	return clientset, nil
 }
