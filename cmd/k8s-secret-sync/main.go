@@ -3,27 +3,17 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"flag"
 	"log"
-	"maps"
 	"os"
-	"path/filepath"
-	"time"
+	"os/signal"
+	"syscall"
 
-	"github.com/jackweinbender/k8s-secret-sync/pkg/op"
+	"github.com/jackweinbender/k8s-secret-sync/pkg/config"
 	"github.com/jackweinbender/k8s-secret-sync/pkg/sync"
 
 	// Import necessary packages for context, logging, Kubernetes client, and 1Password integration.
-	v1 "k8s.io/api/core/v1"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/informers"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
 )
 
 // Annotation keys and default values used for identifying and processing secrets.
@@ -35,156 +25,25 @@ var (
 	defaultSecretDataKey   = "value"                          // Default key in the secret data if annotation is not set
 )
 
-func annotationFor(key string) string {
-	// Helper function to generate the full annotation key with prefix
-	return annotationPrefix + key
-}
-
 func main() {
-	// Create a context for API calls and background operations
-	ctx := context.Background()
+	// Initialize klog flags. Flags will be parsed by config's client init.
+	klog.InitFlags(nil)
+	defer klog.Flush()
 
-	// Initialize the Kubernetes clientset for interacting with the cluster
-	clientset, err := initClientSet()
-	if err != nil {
-		log.Fatalf("Error initializing Kubernetes clientset: %v", err)
+	// Graceful shutdown on SIGINT/SIGTERM.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	cfg := config.New()
+	klog.InfoS("starting", "component", "k8s-secret-sync", "pollInterval", cfg.PollInterval)
+
+	if err := sync.Run(ctx, cfg); err != nil {
+		klog.ErrorS(err, "sync exited with error")
 	}
 
-	// Map of supported secret providers (currently only 1Password)
-	providers := map[string]func() (sync.SecretProvider, error){
-		"op": func() (sync.SecretProvider, error) {
-			opClient, err := op.NewProvider()
-			if err != nil {
-				return nil, err
-			}
-			return opClient, nil
-		},
-	}
+	<-ctx.Done()
+	klog.InfoS("shutting down")
 
-	// Set up a shared informer to watch for changes to Kubernetes secrets
-	secretInformer := informers.NewSharedInformerFactory(
-		clientset, 10*time.Second).Core().V1().Secrets().Informer()
-
-	// Register event handlers for secret add and update events
-	secretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		// Handler for new secret creation events
-		AddFunc: func(obj any) {
-			secret, ok := obj.(*v1.Secret)
-			if !ok {
-				log.Printf("Failed to cast object to Secret on add event, skipping.")
-				return
-			}
-
-			// Check for required provider annotation
-			providerName, exists := secret.Annotations[annotationFor(annotationKeyProvider)]
-			log.Printf("Processing %s/%s with provider %s", secret.Namespace, secret.Name, providerName)
-			if !exists || providerName == "" {
-				log.Printf("Ignoring %s/%s as it does not have the required `provider` annotation", secret.Namespace, secret.Name)
-				return
-			}
-
-			// Check for required ref annotation
-			secretID, exists := secret.Annotations[annotationFor(annotationKeyRef)]
-			if !exists || secretID == "" {
-				log.Printf("Ignoring %s/%s as it does not have the required `ref` annotation", secret.Namespace, secret.Name)
-				return
-			}
-
-			// Check for last-synced annotation
-			if _, synced := secret.Annotations["last-synced"]; synced {
-				log.Printf("Secret %s/%s has already been synced (last-synced annotation present)", secret.Namespace, secret.Name)
-				return
-			}
-
-			// Determine which key in the secret data to update
-			secretDataKey := defaultSecretDataKey
-			if secretKeyAnnotationValue, exists := secret.Annotations[annotationFor(annotationKeySecretKey)]; exists && secretKeyAnnotationValue != "" {
-				secretDataKey = secretKeyAnnotationValue
-			}
-
-			// Fetch the secret value from the provider (e.g., 1Password)
-			provider, err := providers[providerName]()
-			if err != nil {
-				log.Printf("Failed to initialize provider %s: %v", providerName, err)
-				return
-			}
-
-			value, err := provider.GetSecretValue(ctx, secretID)
-			if err != nil {
-				log.Printf("Failed to resolve 1Password secret URI %s: %v", secretID, err)
-				return
-			}
-
-			// Copy annotations and add last-synced
-			annotations := make(map[string]string)
-			maps.Copy(annotations, secret.Annotations)
-			annotations["last-synced"] = time.Now().UTC().Format(time.RFC3339)
-
-			// Prepare the patch data to update the Kubernetes secret
-			patchData := v1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: annotations,
-				},
-				Data: map[string][]byte{
-					secretDataKey: []byte(value),
-				},
-			}
-			payloadBytes, err := json.Marshal(patchData)
-			if err != nil {
-				log.Printf("Failed to marshal patch data: %v", err)
-				return
-			}
-
-			// Patch the secret in the Kubernetes cluster
-			_, err = clientset.CoreV1().Secrets(secret.Namespace).Patch(
-				ctx,
-				secret.Name,
-				types.StrategicMergePatchType,
-				payloadBytes,
-				metav1.PatchOptions{})
-
-			if err != nil {
-				log.Printf("Failed to update Kubernetes Secret %s/%s: %v", secret.Namespace, secret.Name, err)
-				return
-			}
-			log.Printf("Successfully updated Kubernetes Secret %s/%s with 1Password value and set last-synced annotation", secret.Namespace, secret.Name)
-		},
-	})
-
-	// Start the informer to begin watching for secret events
-	stop := make(chan struct{})
-	defer close(stop)
-	secretInformer.Run(stop)
-
-	// Block forever to keep the operator running
-	select {}
-}
-
-// initClientSet initializes and returns a Kubernetes clientset, using in-cluster config if available, or falling back to kubeconfig file.
-func initClientSet() (*kubernetes.Clientset, error) {
-	var kubeconfig *string
-	if home := os.Getenv("HOME"); home != "" {
-		kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
-	} else {
-		kubeconfig = flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
-	}
-	flag.Parse()
-
-	// Try to get in-cluster config first, fall back to .kube if not running in a cluster
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		config, err = clientcmd.BuildConfigFromFlags("", *kubeconfig)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		log.Fatalf("Error creating clientset: %v", err)
-		return nil, err
-	}
-
-	log.Println("Successfully connected to Kubernetes cluster")
-	return clientset, nil
+	// Log the starting of the operator
+	log.Println("Starting k8s-secret-sync operator...")
 }
