@@ -6,26 +6,19 @@ import (
 )
 
 type Sync struct {
-	Clientset            *kubernetes.Clientset
+	Clientset            kubernetes.Interface
 	Annotations          Annotations
 	DefaultSecretDataKey string // Default key in the secret data to store fetched calues if annotation is not set
 	PollInterval         int    // Sync interval in seconds
 }
 
-func New() *Sync {
+func New(cs kubernetes.Interface) *Sync {
 	klog.InfoS("Initializing configuration...")
-
-	// Set up the Kubernetes clientset for interacting with the cluster
-	clientset, err := initClientSet()
-	if err != nil {
-		klog.ErrorS(err, "Error initializing Kubernetes clientset")
-		return nil
-	}
 
 	// Read in configuration from environment variables with defaults
 	klog.InfoS("Loading configuration from environment variables...")
 	return &Sync{
-		Clientset: clientset,
+		Clientset: cs,
 		Annotations: Annotations{
 			ProviderName: env("KSS_SECRET_ANNOTATION_KEY_PROVIDER_NAME", "k8s-secret-sync.weinbender.io/provider-name"),
 			ProviderRef:  env("KSS_SECRET_ANNOTATION_KEY_PROVIDER_REF", "k8s-secret-sync.weinbender.io/provider-ref"),
